@@ -35,7 +35,7 @@ Returns algorithms that a UI can display.
 
 ## `POST /recommendations`
 
-Active optional ranking bridge. The client provides a bounded set of already-loaded candidates and optional playback-history summaries. jellyGPT returns ranked item IDs that the client maps back to its local media items.
+Compatibility ranking bridge. The client provides a bounded set of already-loaded candidates and optional playback-history summaries. jellyGPT returns ranked item IDs that the client maps back to its local media items.
 
 This endpoint does not require Jellyfin credentials.
 
@@ -50,6 +50,11 @@ Request:
   "now": "2026-05-08T12:00:00Z",
   "recent_item_ids": ["recent-item-id"],
   "queue_item_ids": ["already-queued-item-id"],
+  "binge": {
+    "channel": "Example Channel",
+    "series_id": null,
+    "streak_count": 3
+  },
   "current_item": {
     "item_id": "currently-playing-id",
     "title": "Currently playing video",
@@ -101,6 +106,85 @@ Request:
 them to rerank watch-page recommendations around the currently playing item and to keep queued
 items out of the returned rail.
 
+## `POST /index/refresh`
+
+Refreshes the cached Jellyfin index. jellyGPT uses `JELLYFIN_URL` plus either
+`JELLYFIN_API_KEY` or `JELLYFIN_USERNAME`/`JELLYFIN_PASSWORD`.
+
+Request:
+
+```json
+{
+  "user_id": "optional-jellyfin-user-id"
+}
+```
+
+Response:
+
+```json
+{
+  "available": true,
+  "generated_at": "2026-05-08T12:00:00Z",
+  "cache_age_seconds": 0,
+  "user_id": "jellyfin-user-id",
+  "item_count": 1541,
+  "history_count": 42,
+  "source_counts": {
+    "video:Shows": 800,
+    "movie:Movies": 200
+  },
+  "warning": null
+}
+```
+
+## `GET /index/status?user_id=...`
+
+Reads cache freshness and counts without contacting Jellyfin.
+
+## `POST /recommendations/indexed`
+
+Primary JellyTube integration. The client does not send a candidate list. jellyGPT ranks items
+from its cached Jellyfin index using the current item, user id, recent/queue exclusions, and
+optional binge context.
+
+Request:
+
+```json
+{
+  "algo": "blended",
+  "user_id": "jellyfin-user-id",
+  "context": "watch",
+  "limit": 28,
+  "current_item_id": "currently-playing-id",
+  "current_item": {
+    "item_id": "currently-playing-id",
+    "title": "Currently playing video",
+    "type": "Video",
+    "content_kind": "video",
+    "channel": "Example Channel",
+    "series_id": null,
+    "parent_id": null,
+    "genres": ["Technology"]
+  },
+  "recent_item_ids": ["recent-item-id"],
+  "queue_item_ids": ["already-queued-item-id"],
+  "binge": {
+    "channel": "Example Channel",
+    "series_id": null,
+    "streak_count": 3
+  }
+}
+```
+
+`context` filters the indexed catalog before scoring:
+
+- `home` ranks non-movie videos/music videos.
+- `movie` ranks movies.
+- `music` ranks music videos.
+- `watch` ranks movies only for a movie current item, otherwise non-movie items.
+
+Response shape is the same as `POST /recommendations`.
+
 Response:
 
 ```json
@@ -121,7 +205,7 @@ Response:
 
 ## `GET /recommendations?algo=blended&user_id=...&limit=50`
 
-Reserved for future cached recommendation reads. This endpoint should never trigger slow generation work. The current implementation returns an empty placeholder and tells callers to use `POST /recommendations` for active candidate ranking.
+Reads ranked recommendations from the current index without triggering slow refresh work. If no index is present, it returns an empty list and a warning.
 
 ```json
 {
@@ -129,14 +213,6 @@ Reserved for future cached recommendation reads. This endpoint should never trig
   "generated_at": null,
   "cache_age_seconds": null,
   "items": [],
-  "warning": "No cache reader implemented yet; use POST /recommendations with candidates."
+  "warning": "No jellyGPT index is available yet; run POST /index/refresh."
 }
 ```
-
-## Planned endpoints
-
-These are not implemented yet:
-
-- `POST /refresh` — queue or run a cache refresh.
-- `GET /status` — cache freshness, DB visibility, and optional Ollama status.
-- `GET /benchmark` — latest benchmark summary.

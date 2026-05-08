@@ -9,8 +9,9 @@ jellyGPT runs as a small sidecar API. JellyTube remains fully usable without it:
 - FastAPI service with `/health`, `/algorithms`, and recommendation endpoints.
 - Deterministic recommendation scoring for `existing_logic_like`, `recency_popularity`, `label_profile`, and `blended`.
 - Optional `llm_rerank` algorithm metadata for future Ollama-backed refinement.
-- Active JellyTube bridge via `POST /recommendations`: JellyTube can send an already-loaded candidate set and playback-history summary, and jellyGPT returns ranked item IDs.
-- Legacy/cache-style `GET /recommendations` is intentionally still a placeholder until background cache generation is implemented.
+- Indexed Jellyfin bridge via `POST /index/refresh` and `POST /recommendations/indexed`: jellyGPT can build a cached catalog and rank its own data from only the user, current item, and lightweight context.
+- Backward-compatible reranking bridge via `POST /recommendations` for clients that still send bounded candidate sets.
+- Cache-style `GET /recommendations` reads the current index without starting a slow refresh.
 
 Ollama features are experimental and disabled by default. No LLM call is required to run the service.
 
@@ -18,8 +19,8 @@ Ollama features are experimental and disabled by default. No LLM call is require
 
 - Keep JellyTube fast and usable without this service.
 - Keep slow database scans and optional AI/LLM work outside the JellyTube frontend.
-- Support a credential-free bridge where JellyTube can POST bounded candidates for ranking.
-- Support future offline/cache generation for larger self-hosted deployments.
+- Support indexed recommendations where JellyTube does not have to send candidate lists.
+- Keep a credential-free bridge where older clients can POST bounded candidates for ranking.
 - Let users switch between recommendation algorithms in JellyTube.
 
 ## Non-goals
@@ -49,7 +50,7 @@ Run tests and lint:
 
 ```bash
 pytest -q
-ruff check src tests bench_ai_features.py
+ruff check src tests bench_ai_features.py bench_real_jellyfin.py
 ```
 
 Run the synthetic benchmark:
@@ -57,6 +58,18 @@ Run the synthetic benchmark:
 ```bash
 python bench_ai_features.py
 ```
+
+Run the real Jellyfin benchmark against your own server:
+
+```bash
+JELLYFIN_URL=http://jellyfin:8096 \
+JELLYFIN_USERNAME=your-user \
+JELLYFIN_PASSWORD=your-password \
+CACHE_DIR=.cache-real \
+python bench_real_jellyfin.py
+```
+
+The real benchmark refreshes the local index, exercises indexed home/movie/music/watch recommendations, and prints aggregate latency and quality checks without item titles.
 
 ## Interactive setup wizard
 
@@ -98,8 +111,11 @@ services:
     environment:
       JELLYFIN_URL: "http://jellyfin:8096"
       JELLYFIN_API_KEY: "${JELLYFIN_API_KEY}"
+      # Or use JELLYFIN_USERNAME/JELLYFIN_PASSWORD for local testing.
       PLAYBACK_DB: "/jellyfin-data/playback_reporting.db"
       JELLYFIN_DB: "/jellyfin-data/jellyfin.db"
+      INDEX_MAX_AGE_SECONDS: "3600"
+      INDEX_LIMIT_PER_SOURCE: "5000"
       RECS_REFRESH_INTERVAL: "30m"
       ENABLE_LLM_RERANK: "false"
       ENABLE_PROFILE_UPDATES: "false"
@@ -121,8 +137,11 @@ If you publish your own image, replace `YOUR_GITHUB_USER_OR_ORG` with your regis
 
 - `GET /health` — service status.
 - `GET /algorithms` — algorithm metadata for UI selectors.
-- `GET /recommendations` — future cached recommendation reader; currently returns an empty placeholder response.
-- `POST /recommendations` — active optional ranking bridge. The client supplies candidate metadata and optional playback-history summaries; jellyGPT returns ranked item IDs and scores.
+- `GET /recommendations` — read ranked recommendations from the current index without refreshing it.
+- `POST /index/refresh` — refresh the cached Jellyfin index.
+- `GET /index/status` — inspect index freshness and item counts.
+- `POST /recommendations/indexed` — rank cached Jellyfin index data. JellyTube sends only the user/current item and lightweight context, not candidate lists.
+- `POST /recommendations` — optional compatibility bridge. The client supplies candidate metadata and optional playback-history summaries; jellyGPT returns ranked item IDs and scores.
 
 See `docs/api.md` for the full contract.
 

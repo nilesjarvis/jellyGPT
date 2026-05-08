@@ -42,6 +42,12 @@ class RecommendationCandidate(BaseModel):
     playback_position_ticks: int | None = None
 
 
+class BingeContext(BaseModel):
+    channel: str | None = None
+    series_id: str | None = None
+    streak_count: int = 0
+
+
 class RecommendationRequest(BaseModel):
     algo: str = "blended"
     user_id: str | None = None
@@ -53,6 +59,37 @@ class RecommendationRequest(BaseModel):
     history: list[PlaybackHistoryEvent] = Field(default_factory=list)
     recent_item_ids: list[str] = Field(default_factory=list)
     queue_item_ids: list[str] = Field(default_factory=list)
+    binge: BingeContext | None = None
+
+
+class IndexedRecommendationRequest(BaseModel):
+    algo: str = "blended"
+    user_id: str | None = None
+    context: str | None = None
+    limit: int = 50
+    now: str | None = None
+    current_item_id: str | None = None
+    current_item: RecommendationCandidate | None = None
+    history: list[PlaybackHistoryEvent] = Field(default_factory=list)
+    recent_item_ids: list[str] = Field(default_factory=list)
+    queue_item_ids: list[str] = Field(default_factory=list)
+    binge: BingeContext | None = None
+    refresh: bool = False
+
+
+class IndexRefreshRequest(BaseModel):
+    user_id: str | None = None
+
+
+class IndexStatusResponse(BaseModel):
+    available: bool
+    generated_at: str | None = None
+    cache_age_seconds: int | None = None
+    user_id: str | None = None
+    item_count: int = 0
+    history_count: int = 0
+    source_counts: dict[str, int] = Field(default_factory=dict)
+    warning: str | None = None
 
 
 class RecommendationItem(BaseModel):

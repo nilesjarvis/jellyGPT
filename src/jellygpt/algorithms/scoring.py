@@ -5,6 +5,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from jellygpt.schemas import (
+    BingeContext,
     PlaybackHistoryEvent,
     RecommendationCandidate,
     RecommendationItem,
@@ -82,6 +83,7 @@ def rank_candidates(request: RecommendationRequest) -> list[RecommendationItem]:
             watched_series,
             watched_parent_ids,
             set(request.recent_item_ids or []),
+            request.binge,
         )
         ranked.append(
             RecommendationItem(
@@ -108,6 +110,7 @@ def _score_candidate(
     watched_series: Counter[str],
     watched_parent_ids: Counter[str],
     recent_item_ids: set[str],
+    binge: BingeContext | None,
 ) -> tuple[float, list[str]]:
     reasons: list[str] = []
     score = 0.0
@@ -173,6 +176,10 @@ def _score_candidate(
     context_score, context_reasons = _current_context_score(candidate, current_item, context, algo)
     score += context_score
     reasons.extend(reason for reason in context_reasons if reason not in reasons)
+
+    binge_score, binge_reasons = _binge_context_score(candidate, binge, context, algo)
+    score += binge_score
+    reasons.extend(reason for reason in binge_reasons if reason not in reasons)
 
     return score, reasons
 
@@ -240,6 +247,32 @@ def _current_context_score(
         reasons.append("similar title")
 
     score += _duration_affinity(current_item, candidate) * watch_weight
+
+    return score, reasons
+
+
+def _binge_context_score(
+    candidate: RecommendationCandidate,
+    binge: BingeContext | None,
+    context: str,
+    algo: str,
+) -> tuple[float, list[str]]:
+    if not binge or binge.streak_count < 2:
+        return 0.0, []
+
+    reasons: list[str] = []
+    score = 0.0
+    streak_weight = min(max(float(binge.streak_count), 2.0), 8.0)
+    watch_weight = 1.0 if context == "watch" else 0.5
+    profile_weight = 1.0 if algo in {"label_profile", "blended", "llm_rerank"} else 0.6
+    weight = watch_weight * profile_weight
+
+    if binge.channel and _norm(binge.channel) == _norm(candidate.channel):
+        score += min(streak_weight * 3.0 * weight, 18.0)
+        reasons.append("continues current channel")
+    if binge.series_id and binge.series_id == candidate.series_id:
+        score += min(streak_weight * 4.0 * weight, 24.0)
+        reasons.append("continues current series")
 
     return score, reasons
 
