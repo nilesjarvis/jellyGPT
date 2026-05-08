@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -81,13 +82,22 @@ class JellyfinIndexService:
         users = cache.get("users", {})
         if not isinstance(users, dict) or not users:
             return None
+        valid_users = [value for value in users.values() if isinstance(value, dict)]
         if user_id:
             value = users.get(user_id)
-            return value if isinstance(value, dict) else None
-        if len(users) == 1:
-            value = next(iter(users.values()))
-            return value if isinstance(value, dict) else None
-        return None
+            if isinstance(value, dict):
+                return value
+            normalized_user_id = _normalize_db_id(user_id)
+            for key, candidate in users.items():
+                if _normalize_db_id(key) == normalized_user_id and isinstance(candidate, dict):
+                    return candidate
+            for candidate in valid_users:
+                if _normalize_db_id(candidate.get("user_id")) == normalized_user_id:
+                    return candidate
+            return None
+        if len(valid_users) == 1:
+            return valid_users[0]
+        return max(valid_users, key=lambda value: _parse_date(value.get("generated_at")) or datetime.min.replace(tzinfo=timezone.utc))
 
     def get_or_refresh(
         self,
@@ -108,7 +118,7 @@ class JellyfinIndexService:
 
     def refresh(self, user_id: str | None = None) -> dict[str, Any]:
         if not self.settings.jellyfin_url:
-            raise IndexUnavailableError("JELLYFIN_URL is not configured.")
+            return self._refresh_from_local_databases(user_id)
 
         base_url = self.settings.jellyfin_url.rstrip("/")
         auth = self._authenticate(base_url, user_id)
@@ -253,6 +263,119 @@ class JellyfinIndexService:
             raise IndexUnavailableError("JELLYFIN_USER_ID is required when no user can be inferred.")
 
         raise IndexUnavailableError("Configure JELLYFIN_API_KEY or JELLYFIN_USERNAME/JELLYFIN_PASSWORD.")
+
+    def _refresh_from_local_databases(self, user_id: str | None = None) -> dict[str, Any]:
+        jellyfin_db = Path(self.settings.jellyfin_db)
+        playback_db = Path(self.settings.playback_db)
+        if not jellyfin_db.exists():
+            raise IndexUnavailableError(
+                "JELLYFIN_URL is not configured and local JELLYFIN_DB is unavailable."
+            )
+
+        effective_user_id = user_id or self._first_local_user_id(jellyfin_db)
+        items_by_id: dict[str, RecommendationCandidate] = {}
+        source_counts: dict[str, int] = {}
+
+        with sqlite3.connect(f"file:{jellyfin_db}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            user_data = self._local_user_data(conn, effective_user_id)
+            parents = self._local_parent_names(conn)
+            for row in conn.execute(
+                """
+                SELECT Id, Name, Type, MediaType, IsMovie, ParentId, SeriesId, SeriesName,
+                       Genres, DateCreated, PremiereDate, RunTimeTicks, AlbumArtists,
+                       Artists, Studios
+                FROM BaseItems
+                WHERE MediaType = 'Video'
+                  AND Name IS NOT NULL
+                  AND IsVirtualItem = 0
+                """
+            ):
+                candidate = _candidate_from_db_row(row, user_data.get(_normalize_db_id(row["Id"])), parents)
+                if not candidate:
+                    continue
+                items_by_id[candidate.item_id] = candidate
+                source_counts[candidate.content_kind or "video"] = source_counts.get(candidate.content_kind or "video", 0) + 1
+
+        history = self._local_history(playback_db, effective_user_id)
+        generated_at = datetime.now(timezone.utc).isoformat()
+        user_index = {
+            "user_id": effective_user_id,
+            "generated_at": generated_at,
+            "server_url": "local-db",
+            "items": [
+                item.model_dump()
+                for item in sorted(items_by_id.values(), key=lambda candidate: candidate.item_id)
+            ],
+            "history": [event.model_dump() for event in history],
+            "source_counts": source_counts,
+        }
+        cache = self._read_cache()
+        cache["version"] = INDEX_VERSION
+        users = cache.setdefault("users", {})
+        if not isinstance(users, dict):
+            users = {}
+            cache["users"] = users
+        users[effective_user_id] = user_index
+        self._write_cache(cache)
+        return user_index
+
+    def _first_local_user_id(self, jellyfin_db: Path) -> str | None:
+        with sqlite3.connect(f"file:{jellyfin_db}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT Id FROM Users ORDER BY LastActivityDate DESC NULLS LAST LIMIT 1"
+            ).fetchone()
+            return str(row["Id"]) if row and row["Id"] else None
+
+    def _local_user_data(
+        self,
+        conn: sqlite3.Connection,
+        user_id: str | None,
+    ) -> dict[str, sqlite3.Row]:
+        if not user_id:
+            return {}
+        rows = conn.execute(
+            """
+            SELECT ItemId, LastPlayedDate, PlayCount, Played, PlaybackPositionTicks
+            FROM UserData
+            WHERE UserId = ?
+            """,
+            (user_id,),
+        )
+        return {_normalize_db_id(row["ItemId"]): row for row in rows}
+
+    def _local_parent_names(self, conn: sqlite3.Connection) -> dict[str, str]:
+        rows = conn.execute(
+            "SELECT Id, Name FROM BaseItems WHERE Name IS NOT NULL AND IsFolder = 1"
+        )
+        return {_normalize_db_id(row["Id"]): row["Name"] for row in rows}
+
+    def _local_history(self, playback_db: Path, user_id: str | None) -> list[PlaybackHistoryEvent]:
+        if not playback_db.exists():
+            return []
+        query = """
+            SELECT ItemName, COUNT(*) AS TotalCount, SUM(PlayDuration) AS TotalTime,
+                   MAX(DateCreated) AS LatestDate
+            FROM PlaybackActivity
+            WHERE ItemName IS NOT NULL
+        """
+        params: list[Any] = []
+        if user_id:
+            query += " AND (lower(replace(UserId, '-', '')) = ? OR UserId IS NULL OR UserId = '')"
+            params.append(_normalize_db_id(user_id))
+        query += " GROUP BY ItemName ORDER BY LatestDate DESC LIMIT 2000"
+        with sqlite3.connect(f"file:{playback_db}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            return [
+                PlaybackHistoryEvent(
+                    item_name=row["ItemName"],
+                    total_count=row["TotalCount"],
+                    total_time=row["TotalTime"],
+                    latest_date=row["LatestDate"],
+                )
+                for row in conn.execute(query, params)
+            ]
 
     def _get_views(self, client: httpx.Client, user_id: str) -> list[dict[str, Any]]:
         response = client.get(f"/Users/{user_id}/Views")
@@ -503,6 +626,35 @@ def _normalized_text(value: str | None) -> str:
     return " ".join(sorted(_text_tokens(value)))
 
 
+def _candidate_from_db_row(
+    row: sqlite3.Row,
+    user_data: sqlite3.Row | None,
+    parents: dict[str, str],
+) -> RecommendationCandidate | None:
+    item_id = _normalize_db_id(row["Id"])
+    title = row["Name"]
+    if not item_id or not title:
+        return None
+    content_kind = _content_kind_for_db_row(row)
+    return RecommendationCandidate(
+        item_id=item_id,
+        title=title,
+        type=_short_type(row["Type"]),
+        content_kind=content_kind,
+        channel=_channel_name_from_db_row(row, parents, content_kind),
+        series_id=_normalize_db_id(row["SeriesId"]),
+        parent_id=_normalize_db_id(row["ParentId"]),
+        genres=_split_db_list(row["Genres"]),
+        date_created=row["DateCreated"],
+        premiere_date=row["PremiereDate"],
+        last_played_date=user_data["LastPlayedDate"] if user_data else None,
+        run_time_ticks=row["RunTimeTicks"],
+        play_count=user_data["PlayCount"] if user_data else None,
+        played=bool(user_data["Played"]) if user_data else None,
+        playback_position_ticks=user_data["PlaybackPositionTicks"] if user_data else None,
+    )
+
+
 def _candidate_from_item(
     item: dict[str, Any],
     view: dict[str, Any],
@@ -586,6 +738,19 @@ def _content_kind_for_item(item: dict[str, Any]) -> str:
     return "video"
 
 
+def _content_kind_for_db_row(row: sqlite3.Row) -> str:
+    item_type = str(row["Type"] or "")
+    name = str(row["Name"] or "")
+    parent = str(row["ParentId"] or "")
+    if row["IsMovie"]:
+        return "movie"
+    if "MusicVideo" in item_type:
+        return "musicVideo"
+    if "movie" in parent.lower() or "/movies/" in name.lower():
+        return "movie"
+    return "video"
+
+
 def _item_types_for_collection(collection_type: str | None) -> str:
     if collection_type == "movies":
         return "Movie"
@@ -619,6 +784,55 @@ def _first_value(row: dict[str, Any], *names: str) -> Any:
         if value not in (None, ""):
             return value
     return None
+
+
+def _normalize_db_id(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("-", "").lower()
+
+
+def _short_type(value: Any) -> str | None:
+    if not value:
+        return None
+    return str(value).rsplit(".", 1)[-1]
+
+
+def _split_db_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    text = str(value).strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [str(item).strip() for item in parsed if str(item).strip()]
+    for separator in ["|", ";", ","]:
+        if separator in text:
+            return [part.strip() for part in text.split(separator) if part.strip()]
+    return [text]
+
+
+def _channel_name_from_db_row(
+    row: sqlite3.Row,
+    parents: dict[str, str],
+    content_kind: str | None,
+) -> str | None:
+    if row["SeriesName"]:
+        return row["SeriesName"]
+    artists = _split_db_list(row["AlbumArtists"]) or _split_db_list(row["Artists"])
+    if artists:
+        return artists[0]
+    studios = _split_db_list(row["Studios"])
+    if studios:
+        return studios[0]
+    parent_name = parents.get(_normalize_db_id(row["ParentId"]))
+    if parent_name:
+        return parent_name
+    return _title_channel(row["Name"], content_kind)
 
 
 def _parse_date(value: Any) -> datetime | None:
