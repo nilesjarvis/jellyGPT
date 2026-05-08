@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -95,7 +96,14 @@ def rank_candidates(request: RecommendationRequest) -> list[RecommendationItem]:
 
     ranked.sort(key=lambda item: (-item.score, item.item_id))
     candidates_by_id = {candidate.item_id: candidate for candidate in candidates}
-    return _diversify(ranked, candidates_by_id)[: request.limit]
+    return _diversify(
+        ranked,
+        candidates_by_id,
+        context=context,
+        limit=request.limit,
+        rotation_key=current_item.item_id if current_item else None,
+        watch_max_per_channel=10 if request.binge and request.binge.streak_count >= 3 else 6,
+    )[: request.limit]
 
 
 def _score_candidate(
@@ -385,7 +393,20 @@ def _diversify(
     ranked: list[RecommendationItem],
     candidates_by_id: dict[str, RecommendationCandidate],
     max_per_channel: int = 6,
+    context: str = "",
+    limit: int | None = None,
+    rotation_key: str | None = None,
+    watch_max_per_channel: int = 6,
 ) -> list[RecommendationItem]:
+    if context == "watch":
+        return _interleave_by_channel(
+            ranked,
+            candidates_by_id,
+            max_per_channel=watch_max_per_channel,
+            limit=limit,
+            rotation_key=rotation_key,
+        )
+
     selected: list[RecommendationItem] = []
     deferred: list[RecommendationItem] = []
     channel_counts = Counter[str]()
@@ -399,3 +420,98 @@ def _diversify(
         if channel:
             channel_counts[channel] += 1
     return selected + deferred
+
+
+def _interleave_by_channel(
+    ranked: list[RecommendationItem],
+    candidates_by_id: dict[str, RecommendationCandidate],
+    max_per_channel: int,
+    limit: int | None,
+    rotation_key: str | None,
+) -> list[RecommendationItem]:
+    channel_groups: dict[str, list[RecommendationItem]] = {}
+    channel_order: list[str] = []
+
+    for item in ranked:
+        candidate = candidates_by_id.get(item.item_id)
+        channel = _norm(candidate.channel if candidate else None) or item.item_id
+        group = channel_groups.setdefault(channel, [])
+        if not group:
+            channel_order.append(channel)
+        group.append(item)
+
+    if not channel_order:
+        return ranked
+
+    if rotation_key:
+        for channel, group in list(channel_groups.items()):
+            channel_groups[channel] = _rotate_top_channel_items(
+                group,
+                seed=f"{rotation_key}:{channel}",
+                pool_size=max(max_per_channel * 4, 24),
+            )
+
+    target = limit or len(ranked)
+    active_count = max(1, min(len(channel_order), (target + max_per_channel - 1) // max_per_channel))
+    selected: list[RecommendationItem] = []
+
+    while active_count <= len(channel_order):
+        selected = _round_robin_channels(
+            channel_order[:active_count],
+            channel_groups,
+            max_per_channel,
+            target,
+        )
+        if len(selected) >= target or active_count == len(channel_order):
+            break
+        active_count += 1
+
+    selected_ids = {item.item_id for item in selected}
+    return selected + [item for item in ranked if item.item_id not in selected_ids]
+
+
+def _rotate_top_channel_items(
+    group: list[RecommendationItem],
+    seed: str,
+    pool_size: int,
+) -> list[RecommendationItem]:
+    if len(group) < 2:
+        return group
+    head_size = min(len(group), pool_size)
+    head = group[:head_size]
+    tail = group[head_size:]
+    offset = _stable_offset(seed, len(head))
+    if offset == 0:
+        return group
+    return head[offset:] + head[:offset] + tail
+
+
+def _round_robin_channels(
+    channel_order: list[str],
+    channel_groups: dict[str, list[RecommendationItem]],
+    max_per_channel: int,
+    limit: int,
+) -> list[RecommendationItem]:
+    selected: list[RecommendationItem] = []
+    offsets = {channel: 0 for channel in channel_order}
+    while len(selected) < limit:
+        added = False
+        for channel in channel_order:
+            if len(selected) >= limit:
+                break
+            offset = offsets[channel]
+            if offset >= min(len(channel_groups[channel]), max_per_channel):
+                continue
+            selected.append(channel_groups[channel][offset])
+            offsets[channel] = offset + 1
+            added = True
+        if not added:
+            break
+    return selected
+
+
+def _stable_offset(value: str, modulo: int) -> int:
+    if modulo <= 1:
+        return 0
+    digest = hashlib.blake2s(value.encode("utf-8"), digest_size=4).digest()
+    return int.from_bytes(digest, "big") % modulo

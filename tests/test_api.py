@@ -112,6 +112,150 @@ def test_watch_context_prefers_similar_metadata_over_same_channel_filler():
     assert "queued" not in ranked_ids
 
 
+def test_watch_context_interleaves_large_same_channel_groups():
+    client = TestClient(app)
+    candidates = [
+        {
+            "item_id": f"snl-{idx}",
+            "title": f"Weekend Update clip {idx}",
+            "channel": "SNL",
+            "content_kind": "video",
+            "genres": ["Comedy"],
+            "premiere_date": "2026-05-07T00:00:00+00:00",
+            "run_time_ticks": 8 * 60 * 10_000_000,
+        }
+        for idx in range(1, 7)
+    ]
+    candidates.extend(
+        [
+            {
+                "item_id": "late-night",
+                "title": "Late night sketch comedy",
+                "channel": "Late Night",
+                "content_kind": "video",
+                "genres": ["Comedy"],
+                "premiere_date": "2026-05-06T00:00:00+00:00",
+                "run_time_ticks": 8 * 60 * 10_000_000,
+            },
+            {
+                "item_id": "standup",
+                "title": "Standup comedy set",
+                "channel": "Comedy Club",
+                "content_kind": "video",
+                "genres": ["Comedy"],
+                "premiere_date": "2026-05-05T00:00:00+00:00",
+                "run_time_ticks": 8 * 60 * 10_000_000,
+            },
+            {
+                "item_id": "panel",
+                "title": "Comedy panel highlights",
+                "channel": "Panel Show",
+                "content_kind": "video",
+                "genres": ["Comedy"],
+                "premiere_date": "2026-05-04T00:00:00+00:00",
+                "run_time_ticks": 8 * 60 * 10_000_000,
+            },
+            {
+                "item_id": "improv",
+                "title": "Improv comedy scene",
+                "channel": "Improv House",
+                "content_kind": "video",
+                "genres": ["Comedy"],
+                "premiere_date": "2026-05-03T00:00:00+00:00",
+                "run_time_ticks": 8 * 60 * 10_000_000,
+            },
+        ]
+    )
+    channels = {candidate["item_id"]: candidate["channel"] for candidate in candidates}
+    payload = {
+        "algo": "blended",
+        "context": "watch",
+        "limit": 8,
+        "now": "2026-05-08T12:00:00+00:00",
+        "current_item": {
+            "item_id": "current",
+            "title": "Weekend Update",
+            "channel": "SNL",
+            "content_kind": "video",
+            "genres": ["Comedy"],
+            "run_time_ticks": 8 * 60 * 10_000_000,
+        },
+        "candidates": candidates,
+    }
+
+    response = client.post("/recommendations", json=payload)
+
+    assert response.status_code == 200
+    ranked_ids = [item["item_id"] for item in response.json()["items"]]
+    top_channels = [channels[item_id] for item_id in ranked_ids[:4]]
+    assert top_channels.count("SNL") <= 2
+    assert [channels[item_id] for item_id in ranked_ids].count("SNL") == 6
+
+
+def test_watch_context_rotates_large_channel_groups_by_current_item():
+    client = TestClient(app)
+    candidates = [
+        {
+            "item_id": f"snl-{idx}",
+            "title": f"Weekend Update clip {idx}",
+            "channel": "SNL",
+            "content_kind": "video",
+            "genres": ["Comedy"],
+            "premiere_date": "2026-05-07T00:00:00+00:00",
+            "run_time_ticks": 8 * 60 * 10_000_000,
+        }
+        for idx in range(1, 17)
+    ]
+    candidates.extend(
+        [
+            {
+                "item_id": f"other-{idx}",
+                "title": f"Sketch comedy clip {idx}",
+                "channel": f"Comedy Channel {idx}",
+                "content_kind": "video",
+                "genres": ["Comedy"],
+                "premiere_date": "2026-05-01T00:00:00+00:00",
+                "run_time_ticks": 8 * 60 * 10_000_000,
+            }
+            for idx in range(1, 7)
+        ]
+    )
+
+    def ranked_snl_ids(current_id: str) -> list[str]:
+        response = client.post(
+            "/recommendations",
+            json={
+                "algo": "blended",
+                "context": "watch",
+                "limit": 12,
+                "now": "2026-05-08T12:00:00+00:00",
+                "current_item": {
+                    "item_id": current_id,
+                    "title": "Weekend Update",
+                    "channel": "SNL",
+                    "content_kind": "video",
+                    "genres": ["Comedy"],
+                    "run_time_ticks": 8 * 60 * 10_000_000,
+                },
+                "binge": {
+                    "channel": "SNL",
+                    "streak_count": 4,
+                },
+                "candidates": candidates,
+            },
+        )
+        assert response.status_code == 200
+        ranked_ids = [item["item_id"] for item in response.json()["items"]]
+        return [item_id for item_id in ranked_ids if item_id.startswith("snl-")]
+
+    first = ranked_snl_ids("current-a")
+    second = ranked_snl_ids("current-b")
+
+    assert len(first) >= 4
+    assert len(second) >= 4
+    assert first != second
+
+
 def test_get_recommendations_reports_missing_index(monkeypatch, tmp_path):
     monkeypatch.setenv("CACHE_DIR", str(tmp_path))
     client = TestClient(app)
