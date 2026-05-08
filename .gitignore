@@ -1,0 +1,39 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local environments and secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Build/package output
+dist/
+build/
+*.egg-info/
+
+# Local/generated jellyGPT data
+.cache/
+.cache-cache/
+.cache_recs/
+.cache_jellygpt/
+/cache/
+outputs/
+docker-compose.local.yml
+*.log
+
+# Jellyfin databases and generated personal artifacts
+*.db
+*.db-shm
+*.db-wal
+playback_knowledge.md
+media_labels.json
+recommender_benchmark*.json
+recommender_benchmark*.md
+profiles/

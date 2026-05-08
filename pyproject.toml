@@ -1,0 +1,29 @@
+[project]
+name = "jellygpt"
+version = "0.1.0"
+description = "Optional cached recommendation and local-AI companion service for JellyTube/Jellyfin"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+keywords = ["jellyfin", "recommendations", "self-hosted", "fastapi", "ollama"]
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "pydantic>=2.0",
+  "httpx>=0.26",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.4",
+]
+
+[project.scripts]
+jellygpt = "jellygpt.cli:main"
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

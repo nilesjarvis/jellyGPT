@@ -1,0 +1,26 @@
+services:
+  jellygpt:
+    build: .
+    ports:
+      - "8787:8787"
+    env_file:
+      - .env  # copy .env.example to .env and fill in local values first
+    volumes:
+      # Adjust this host path to match the Jellyfin install.
+      - /var/lib/jellyfin/data:/jellyfin-data:ro
+      - jellygpt-cache:/cache
+    restart: unless-stopped
+
+  # Optional: enable if you want periodic Ollama-backed Markdown taste profiles.
+  # jellygpt-profile-worker:
+  #   build: .
+  #   command: ["jellygpt", "worker", "profile-loop"]
+  #   env_file:
+  #     - .env  # copy .env.example to .env and fill in local values first
+  #   volumes:
+  #     - /var/lib/jellyfin/data:/jellyfin-data:ro
+  #     - jellygpt-cache:/cache
+  #   restart: unless-stopped
+
+volumes:
+  jellygpt-cache:
