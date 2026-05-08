@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -32,7 +32,7 @@ class RecommendationCandidate(BaseModel):
     channel: str | None = None
     series_id: str | None = None
     parent_id: str | None = None
-    genres: list[str] = []
+    genres: list[str] = Field(default_factory=list)
     date_created: str | None = None
     premiere_date: str | None = None
     last_played_date: str | None = None
@@ -45,11 +45,14 @@ class RecommendationCandidate(BaseModel):
 class RecommendationRequest(BaseModel):
     algo: str = "blended"
     user_id: str | None = None
+    context: str | None = None
     limit: int = 50
     now: str | None = None
     candidates: list[RecommendationCandidate]
-    history: list[PlaybackHistoryEvent] = []
-    recent_item_ids: list[str] = []
+    current_item: RecommendationCandidate | None = None
+    history: list[PlaybackHistoryEvent] = Field(default_factory=list)
+    recent_item_ids: list[str] = Field(default_factory=list)
+    queue_item_ids: list[str] = Field(default_factory=list)
 
 
 class RecommendationItem(BaseModel):

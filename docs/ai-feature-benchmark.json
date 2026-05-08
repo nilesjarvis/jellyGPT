@@ -3,7 +3,7 @@
   "notes": [
     "POST /recommendations ranks client-provided candidates without Jellyfin credentials.",
     "JellyTube can consume these ranked item ids and fall back to built-in ranking on error/empty output.",
-    "llm_rerank remains a metadata-gated option; no live LLM calls are in the page-render path."
+    "llm_rerank is intentionally omitted from this deterministic benchmark."
   ],
   "cases": [
     {
@@ -15,10 +15,10 @@
           "status_codes": [
             200
           ],
-          "mean_ms": 0.83,
-          "median_ms": 0.781,
-          "p95_ms": 0.943,
-          "max_ms": 8.688,
+          "mean_ms": 1.535,
+          "median_ms": 1.436,
+          "p95_ms": 2.133,
+          "max_ms": 15.134,
           "result_count": 0,
           "warning": null
         },
@@ -28,10 +28,10 @@
           "status_codes": [
             200
           ],
-          "mean_ms": 0.883,
-          "median_ms": 0.879,
-          "p95_ms": 0.994,
-          "max_ms": 1.265,
+          "mean_ms": 1.529,
+          "median_ms": 1.589,
+          "p95_ms": 2.224,
+          "max_ms": 2.626,
           "result_count": 0,
           "warning": null
         },
@@ -41,11 +41,24 @@
           "status_codes": [
             200
           ],
-          "mean_ms": 1.137,
-          "median_ms": 1.133,
-          "p95_ms": 1.288,
-          "max_ms": 1.412,
+          "mean_ms": 1.931,
+          "median_ms": 1.957,
+          "p95_ms": 2.482,
+          "max_ms": 4.771,
           "result_count": 6,
+          "warning": null
+        },
+        {
+          "label": "POST /recommendations blended watch context",
+          "runs": 200,
+          "status_codes": [
+            200
+          ],
+          "mean_ms": 2.001,
+          "median_ms": 2.024,
+          "p95_ms": 2.837,
+          "max_ms": 4.019,
+          "result_count": 5,
           "warning": null
         }
       ],
@@ -67,8 +80,8 @@
           "algo": "recency_popularity",
           "ranked": [
             "rust-new",
-            "crypto-terminal",
             "ai-homelab",
+            "crypto-terminal",
             "cooking",
             "old-news",
             "travel"
@@ -102,103 +115,59 @@
           "recall_at_3": 1.0,
           "first_irrelevant_rank": 4
         }
-      ]
-    },
-    {
-      "enable_llm_rerank": true,
-      "latency": [
-        {
-          "label": "GET /health",
-          "runs": 200,
-          "status_codes": [
-            200
-          ],
-          "mean_ms": 0.96,
-          "median_ms": 0.949,
-          "p95_ms": 1.11,
-          "max_ms": 1.274,
-          "result_count": 0,
-          "warning": null
-        },
-        {
-          "label": "GET /algorithms",
-          "runs": 200,
-          "status_codes": [
-            200
-          ],
-          "mean_ms": 1.05,
-          "median_ms": 1.042,
-          "p95_ms": 1.189,
-          "max_ms": 1.457,
-          "result_count": 0,
-          "warning": null
-        },
-        {
-          "label": "POST /recommendations blended synthetic",
-          "runs": 200,
-          "status_codes": [
-            200
-          ],
-          "mean_ms": 1.289,
-          "median_ms": 1.291,
-          "p95_ms": 1.435,
-          "max_ms": 1.54,
-          "result_count": 6,
-          "warning": null
-        }
       ],
-      "quality": [
+      "context_quality": [
         {
           "algo": "existing_logic_like",
           "ranked": [
-            "rust-new",
-            "crypto-terminal",
-            "ai-homelab",
+            "similar-science",
+            "same-channel-filler",
+            "similar-longform",
             "cooking",
-            "old-news",
             "travel"
           ],
-          "recall_at_3": 1.0,
-          "first_irrelevant_rank": 4
+          "recall_at_2": 0.5,
+          "first_irrelevant_rank": 2,
+          "queue_excluded": true
         },
         {
           "algo": "recency_popularity",
           "ranked": [
-            "rust-new",
-            "crypto-terminal",
-            "ai-homelab",
+            "similar-science",
+            "same-channel-filler",
+            "similar-longform",
             "cooking",
-            "old-news",
             "travel"
           ],
-          "recall_at_3": 1.0,
-          "first_irrelevant_rank": 4
+          "recall_at_2": 0.5,
+          "first_irrelevant_rank": 2,
+          "queue_excluded": true
         },
         {
           "algo": "label_profile",
           "ranked": [
-            "rust-new",
-            "crypto-terminal",
-            "ai-homelab",
+            "similar-science",
+            "similar-longform",
+            "same-channel-filler",
             "cooking",
-            "old-news",
             "travel"
           ],
-          "recall_at_3": 1.0,
-          "first_irrelevant_rank": 4
+          "recall_at_2": 1.0,
+          "first_irrelevant_rank": 3,
+          "queue_excluded": true
         },
         {
           "algo": "blended",
           "ranked": [
-            "rust-new",
-            "crypto-terminal",
-            "ai-homelab",
+            "similar-science",
+            "similar-longform",
+            "same-channel-filler",
             "cooking",
-            "old-news",
             "travel"
           ],
-          "recall_at_3": 1.0,
-          "first_irrelevant_rank": 4
+          "recall_at_2": 1.0,
+          "first_irrelevant_rank": 3,
+          "queue_excluded": true
         }
       ]
     }

@@ -4,7 +4,7 @@
 
 Approximation of JellyTube's built-in recommendation behavior. Used as a baseline and fallback-oriented mode.
 
-Current signals include played/unplayed state, item age, recent-play penalties, channel affinity, and simple metadata matches.
+Current signals include played/unplayed state, item age, recent-play penalties, channel affinity, current-item context, and simple metadata matches.
 
 ## `recency_popularity`
 
@@ -12,13 +12,13 @@ Prioritizes newer items and frequently played/engaged items. It is fast and dete
 
 ## `label_profile`
 
-Current implementation: deterministic profile-style scoring from caller-provided candidate metadata and playback-history summaries. It uses channel, series, genre, and title-token overlap as lightweight taste signals.
+Current implementation: deterministic profile-style scoring from caller-provided candidate metadata, playback-history summaries, and optional watch context. It uses channel, series, genre, duration, content-kind, and title-token overlap as lightweight taste signals.
 
 Future cached implementation: can incorporate richer precomputed media labels and engagement-weighted playback history from background workers.
 
 ## `blended`
 
-Recommended enhanced default. Combines newness, unplayed preference, channel/series affinity, genre/title overlap, and recent-play penalties.
+Recommended enhanced default. Combines newness, unplayed preference, channel/series affinity, genre/title overlap, current-item similarity, queue exclusion, and recent-play penalties.
 
 ## `llm_rerank`
 

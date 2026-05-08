@@ -9,6 +9,7 @@ Implemented behavior:
 - `llm_rerank` appears in `GET /algorithms`.
 - `llm_rerank` availability is controlled by `ENABLE_LLM_RERANK`.
 - `POST /recommendations` ranks client-provided candidate metadata without Jellyfin credentials.
+- `POST /recommendations` can use optional watch context (`current_item` and `queue_item_ids`) to rerank a watch-page rail.
 - `GET /recommendations` remains a cache-reader placeholder and does not call Ollama.
 - Page-load-safe behavior is preserved: no LLM call, no SQLite scan, no generation during a recommendation API request.
 
@@ -25,8 +26,10 @@ Typical current results:
 
 - `GET /health`: around 1 ms mean latency.
 - `GET /algorithms`: around 1 ms mean latency.
-- `POST /recommendations` with a small synthetic candidate set: around 1.1-1.3 ms mean latency.
+- `POST /recommendations` with a small synthetic candidate set: around 1.7 ms mean latency in the current local run.
+- `POST /recommendations` with watch context: around 2.1 ms mean latency in the current local run.
 - Synthetic quality check: deterministic algorithms place the three relevant synthetic examples in the top three for the included benchmark case.
+- Watch-context quality check: `label_profile` and `blended` place the two similar current-item matches in the top two while excluding queued items.
 
 ## Re-run
 

@@ -24,7 +24,13 @@ def test_post_recommendations_ranks_candidates_from_watch_history():
         "algo": "blended",
         "limit": 3,
         "now": "2026-05-08T12:00:00+00:00",
-        "history": [{"item_name": "Rust self hosting tutorial", "total_count": 4, "total_time": 3600}],
+        "history": [
+            {
+                "item_name": "Rust self hosting tutorial",
+                "total_count": 4,
+                "total_time": 3600,
+            }
+        ],
         "candidates": [
             {
                 "item_id": "rust-new",
@@ -48,6 +54,59 @@ def test_post_recommendations_ranks_candidates_from_watch_history():
     data = response.json()
     assert data["warning"] is None
     assert [item["item_id"] for item in data["items"]][:2] == ["rust-new", "cooking-old"]
+
+
+def test_watch_context_prefers_similar_metadata_over_same_channel_filler():
+    client = TestClient(app)
+    payload = {
+        "algo": "blended",
+        "context": "watch",
+        "limit": 3,
+        "now": "2026-05-08T12:00:00+00:00",
+        "current_item": {
+            "item_id": "current",
+            "title": "Quantum physics explained - Physics Channel",
+            "channel": "Physics Channel",
+            "content_kind": "video",
+            "genres": ["Science"],
+            "run_time_ticks": 18 * 60 * 10_000_000,
+        },
+        "queue_item_ids": ["queued"],
+        "candidates": [
+            {
+                "item_id": "same-channel-filler",
+                "title": "Weekly mailbag - Physics Channel",
+                "channel": "Physics Channel",
+                "content_kind": "video",
+                "genres": ["Talk"],
+                "premiere_date": "2026-05-07T00:00:00+00:00",
+                "run_time_ticks": 18 * 60 * 10_000_000,
+            },
+            {
+                "item_id": "similar-science",
+                "title": "Quantum physics experiment explained",
+                "channel": "Science Lab",
+                "content_kind": "video",
+                "genres": ["Science"],
+                "premiere_date": "2026-01-01T00:00:00+00:00",
+                "run_time_ticks": 20 * 60 * 10_000_000,
+            },
+            {
+                "item_id": "queued",
+                "title": "Quantum physics follow-up",
+                "channel": "Science Lab",
+                "content_kind": "video",
+                "genres": ["Science"],
+                "run_time_ticks": 20 * 60 * 10_000_000,
+            },
+        ],
+    }
+
+    response = client.post("/recommendations", json=payload)
+    assert response.status_code == 200
+    ranked_ids = [item["item_id"] for item in response.json()["items"]]
+    assert ranked_ids[0] == "similar-science"
+    assert "queued" not in ranked_ids
 
 
 def test_get_recommendations_remains_cache_placeholder():

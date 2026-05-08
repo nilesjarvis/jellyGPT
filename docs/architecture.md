@@ -20,7 +20,7 @@ Jellyfin DBs/API -> jellyGPT offline generator -> cached JSON -> jellyGPT GET /r
 
 JellyTube must never depend on slow jellyGPT work. If jellyGPT is unavailable, times out, or returns no useful items, JellyTube falls back to built-in recommendation logic.
 
-The current `POST /recommendations` bridge is intended to be fast and deterministic. It receives a bounded candidate set from the client and returns ranked IDs; it should not perform live SQLite scans or LLM calls.
+The current `POST /recommendations` bridge is intended to be fast and deterministic. It receives a bounded candidate set from the client and returns ranked IDs; it should not perform live SQLite scans or LLM calls. For watch-page rails, the client can also send the current item and queue IDs so jellyGPT can favor similar metadata while avoiding already-queued items.
 
 Background workers may later do slow work, including:
 

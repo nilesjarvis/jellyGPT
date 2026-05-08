@@ -45,9 +45,28 @@ Request:
 {
   "algo": "blended",
   "user_id": "optional-client-user-id",
+  "context": "watch",
   "limit": 50,
   "now": "2026-05-08T12:00:00Z",
   "recent_item_ids": ["recent-item-id"],
+  "queue_item_ids": ["already-queued-item-id"],
+  "current_item": {
+    "item_id": "currently-playing-id",
+    "title": "Currently playing video",
+    "type": "Video",
+    "content_kind": "video",
+    "channel": "Example Channel",
+    "series_id": null,
+    "parent_id": null,
+    "genres": ["Technology"],
+    "date_created": "2026-05-01T00:00:00Z",
+    "premiere_date": "2026-04-30T00:00:00Z",
+    "last_played_date": null,
+    "run_time_ticks": 6000000000,
+    "play_count": 0,
+    "played": false,
+    "playback_position_ticks": 0
+  },
   "history": [
     {
       "item_name": "Example show or video title",
@@ -77,6 +96,10 @@ Request:
   ]
 }
 ```
+
+`context`, `current_item`, and `queue_item_ids` are optional. When present, jellyGPT uses
+them to rerank watch-page recommendations around the currently playing item and to keep queued
+items out of the returned rail.
 
 Response:
 
